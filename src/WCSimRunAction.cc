@@ -1,11 +1,9 @@
 #include "WCSimRunAction.hh"
 #include "WCSimRunActionMessenger.hh"
-
 #include "G4Run.hh"
 #include "G4UImanager.hh"
 #include "G4VVisManager.hh"
 #include "G4ios.hh"
-
 #include "jhfNtuple.h"
 
 #ifdef REFLEX_DICTIONARY
@@ -21,6 +19,14 @@
 #include "WCSimPmtInfo.hh"
 
 #include <vector>
+#include "TFile.h"
+#include "TDirectory.h"
+
+//pion analysis
+#include "WCSimAncestryMap.hh"
+#include "WCSimPionSourceTree.hh"
+#include "WCSimSecondaryTrackTree.hh"
+#include "WCSimPionStepsTree.hh"
 
 int pawc_[500000];                // Declare the PAWC common
 struct ntupleStruct jhfNtuple;    // global, ToDo: why not use and set the class member?
@@ -114,7 +120,13 @@ void WCSimRunAction::BeginOfRunAction(const G4Run* aRun)
     if (run == 0) {
       TFile *hfile = new TFile(rootname.c_str(), "RECREATE", "WCSim ROOT file");
       hfile->SetCompressionLevel(2);
+      //JR EDIT BEGIN
 
+      // --- PION ANALYSIS: book new trees ---
+      PionPhotonsTree_Book(hfile);
+      SecondaryTracksTree_Book(hfile);
+      PionStepsTree_Book(hfile);
+      // --- Create the per-detected-photon tree (primary-muon Cherenkov photons only) ---
       if (wcsimdetector->GetIsNuPrism()) {
 	if (fSettingsInputTree) {
 	  fSettingsOutputTree = fSettingsInputTree->CloneTree(0);
@@ -506,6 +518,25 @@ void WCSimRunAction::EndOfRunAction(const G4Run*)
   //Write the options tree
   G4cout << "EndOfRunAction" << G4endl;
   
+
+// --- PION ANALYSIS: write new trees ---
+if (pion_photons_tree) {
+  gFile->cd();
+  PionPhotonsTree_Write();
+}
+
+if (secondary_tracks_tree) {
+  gFile->cd();
+  SecondaryTracksTree_Write();
+}
+
+if (pion_steps_tree) {
+  gFile->cd();
+  PionStepsTree_Write();
+}
+
+  //JR EDIT END
+
   // Close the Root file at the end of the run
 
   if(useFlatROOTout) {

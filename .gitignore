@@ -57,3 +57,10 @@ src/WCSimGenerator_Solar.cc
 
 ## Ignore DS_STORE file
 .DS_STORE
+
+# out-of-source build trees used for the pion-analysis modification
+build_modified/
+build_original/
+# simulation output
+*.root
+*.npz

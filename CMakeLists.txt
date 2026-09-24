@@ -259,11 +259,20 @@ pbuilder_install_files_executable(${CMAKE_INSTALL_PREFIX}/bin
         ${PROJECT_SOURCE_DIR}/sample-root-scripts/KinSplitter.py
         )
 
-pbuilder_install_files(${CMAKE_INSTALL_PREFIX}/bin/rootwc-files
-        ${PROJECT_SOURCE_DIR}/rootwc/loadincs.C
-        ${PROJECT_SOURCE_DIR}/rootwc/loadlibs.C
-        ${PROJECT_SOURCE_DIR}/rootwc/rootwc.C
-        )
+# Install the optional rootwc ROOT helper scripts only if they are present.
+# Without this guard, a checkout missing any of them makes `make install` abort
+# HERE -- before the WCSim executable and libraries are installed -- which
+# silently leaves install/ holding a previous build while the source tree moves
+# on.  That failure mode is easy to lose hours to, so fail soft instead.
+if(EXISTS ${PROJECT_SOURCE_DIR}/rootwc/loadincs.C)
+    pbuilder_install_files(${CMAKE_INSTALL_PREFIX}/bin/rootwc-files
+            ${PROJECT_SOURCE_DIR}/rootwc/loadincs.C
+            ${PROJECT_SOURCE_DIR}/rootwc/loadlibs.C
+            ${PROJECT_SOURCE_DIR}/rootwc/rootwc.C
+            )
+else()
+    message(STATUS "rootwc helper scripts not found -- skipping rootwc-files install")
+endif()
 
 pbuilder_install_files(${CMAKE_INSTALL_PREFIX}/mPMT-configfiles
         ${PROJECT_SOURCE_DIR}/mPMT-configfiles/mPMTconfig_19_nuPrism.txt

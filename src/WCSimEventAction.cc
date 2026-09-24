@@ -28,7 +28,7 @@
 
 #include "G4PhysicalConstants.hh"
 #include "G4SystemOfUnits.hh"
-
+//#include "WCSimMichelAllPhotonsTree.hh"
 #include <set>
 #include <iomanip>
 #include <string>
@@ -39,6 +39,11 @@
 #include "TFile.h"
 #include "WCSimRootEvent.hh"
 #include "TStopwatch.h"
+
+
+//pion analysis
+#include "WCSimAncestryMap.hh"
+#include "WCSimSecondaryTrackTree.hh"
 
 #ifndef _SAVE_RAW_HITS
 #define _SAVE_RAW_HITS
@@ -59,6 +64,13 @@
 #endif
 
 //#define DEBUG
+
+
+//extern int g_michel_trk;
+//extern bool g_michel_electron_started;
+// Global event index for your custom trees
+//int g_wcsim_evt = -1;
+
 
 WCSimEventAction::WCSimEventAction(WCSimRunAction* myRun,
 				   WCSimDetectorConstruction* myDetector,
@@ -228,6 +240,30 @@ void WCSimEventAction::CreateDAQInstances()
 
 void WCSimEventAction::BeginOfEventAction(const G4Event*)
 {
+
+
+// PION ANALYSIS: reset per-event state
+AncestryMap_Clear();
+// B1 FIX diagnostic: with one-row-per-track filling, every buffered track
+// should have been emitted when it died.  Anything still buffered here was
+// silently dropped -- warn rather than lose it without trace.
+if (!g_secTrackBuffer.empty()) {
+  static int nSecTrkWarn = 0;
+  if (nSecTrkWarn++ < 10)
+    G4cout << "[SECTRK-WARN] " << g_secTrackBuffer.size()
+           << " buffered secondary_tracks entr(ies) never reached a terminal "
+              "status and were dropped" << G4endl;
+}
+SecondaryTracksTree_ClearBuffer();
+// g_allPhotonBirth is cleared in UserSteppingAction via the evid latch
+
+// JR EDIT BEGIN
+  // ---- per-event reset of custom-tree event index ----
+const G4Event* evt = G4RunManager::GetRunManager()->GetCurrentEvent();
+
+if (evt) g_wcsim_evt = evt->GetEventID();
+else     g_wcsim_evt = -1;
+//JR EDIT END
   if(!ConstructedDAQClasses) {
     CreateDAQInstances();
 
@@ -282,6 +318,142 @@ void WCSimEventAction::EndOfEventAction(const G4Event* evt)
   // ----------------------------------------------------------------------
   //  Get WC Hit Collection
   // ----------------------------------------------------------------------
+
+  //JR BEGIN EDIT
+    // ---- Michel electron / photon trees: per-event reset ----
+  //g_michel_trk = -1;
+  //g_michel_electron_started = false;
+  // Use Geant4's event ID as the event index for our trees
+  //if (evt) g_wcsim_evt = evt->GetEventID();
+  //else     g_wcsim_evt = -1;
+  // ---------------------------------------------------------
+  //JR END EDIT	
+  
+  /* 
+  //JR EDIT BEGIN FOR WATER ONLY WORLD
+
+  G4SDManager* SDman_safe = G4SDManager::GetSDMpointer();
+
+// Get Hit collection of this event
+G4HCofThisEvent* HCE_safe = evt->GetHCofThisEvent();
+
+// ----- First PMT type hits -----
+WCSimWCHitsCollection* WCHC_safe = nullptr;
+G4String WCIDCollectionName_safe = detectorConstructor->GetIDCollectionName();
+
+#ifdef DEBUG
+  G4cout << "Load the first PMT type hits" << G4endl;
+#endif
+
+if (!HCE_safe) {
+  G4cout << "No HCofThisEvent (no hit collections). Skipping DAQ/digitization." << G4endl;
+  return;
+}
+
+G4int collectionID_safe = SDman_safe->GetCollectionID(WCIDCollectionName_safe);
+if (collectionID_safe < 0) {
+  G4cout << "<" << WCIDCollectionName_safe << "> is not found. "
+         << "Likely water-only geometry (no PMTs). Skipping DAQ/digitization." << G4endl;
+  return;
+}
+
+WCHC_safe = (WCSimWCHitsCollection*)HCE_safe->GetHC(collectionID_safe);
+if (!WCHC_safe) {
+  G4cout << "Hit collection pointer is null for <" << WCIDCollectionName_safe << ">. "
+         << "Skipping DAQ/digitization." << G4endl;
+  return;
+}
+
+G4cout << "WCSimEventAction::EndOfEventAction ☆ (WCSimWCHitsCollection*)"
+       << WCIDCollectionName_safe << " has " << WCHC_safe->entries()
+       << " entries (hit PMTs)" << G4endl;
+
+// ----- Second PMT type hits (hybrid version) -----
+WCSimWCHitsCollection* WCHC2_safe = nullptr;
+G4String WCIDCollectionName2_safe;
+
+if (detectorConstructor->GetHybridPMT()) {
+  WCIDCollectionName2_safe = detectorConstructor->GetIDCollectionName2();
+  G4cout << "Load the second PMT type hits" << G4endl;
+
+  G4int collectionID2_safe = SDman_safe->GetCollectionID(WCIDCollectionName2_safe);
+  if (collectionID2_safe < 0) {
+    G4cout << "<" << WCIDCollectionName2_safe << "> is not found. Skipping hybrid DAQ." << G4endl;
+    return;  // safe for water-only mode
+  }
+
+  WCHC2_safe = (WCSimWCHitsCollection*)HCE_safe->GetHC(collectionID2_safe);
+  if (!WCHC2_safe) {
+    G4cout << "Hybrid hit collection pointer is null for <" << WCIDCollectionName2_safe
+           << ">. Skipping hybrid DAQ." << G4endl;
+    return;
+  }
+}
+ */ 
+  /* OLD VERSION
+    G4SDManager* SDman = G4SDManager::GetSDMpointer();
+
+  // Get Hit collection of this event
+  G4HCofThisEvent* HCE = evt->GetHCofThisEvent();
+
+  // ----- First PMT type hits -----
+  WCSimWCHitsCollection* WCHC = nullptr;
+  G4String WCIDCollectionName = detectorConstructor->GetIDCollectionName();
+
+#ifdef DEBUG
+  G4cout << "Load the first PMT type hits" << G4endl;
+#endif
+
+  if (!HCE) {
+    G4cout << "No HCofThisEvent (no hit collections). Skipping DAQ/digitization." << G4endl;
+    return;
+  }
+
+  G4int collectionID = SDman->GetCollectionID(WCIDCollectionName);
+  if (collectionID < 0) {
+    G4cout << "<" << WCIDCollectionName << "> is not found. "
+           << "Likely water-only geometry (no PMTs). Skipping DAQ/digitization." << G4endl;
+    return;
+  }
+
+  WCHC = (WCSimWCHitsCollection*)HCE->GetHC(collectionID);
+  if (!WCHC) {
+    G4cout << "Hit collection pointer is null for <" << WCIDCollectionName << ">. "
+           << "Skipping DAQ/digitization." << G4endl;
+    return;
+  }
+
+  G4cout << "WCSimEventAction::EndOfEventAction ☆ (WCSimWCHitsCollection*)"
+         << WCIDCollectionName << " has " << WCHC->entries()
+         << " entries (hit PMTs)" << G4endl;
+
+  // ----- Second PMT type hits (hybrid version) -----
+  WCSimWCHitsCollection* WCHC2 = nullptr;
+  G4String WCIDCollectionName2;
+
+  if (detectorConstructor->GetHybridPMT()) {
+    WCIDCollectionName2 = detectorConstructor->GetIDCollectionName2();
+    G4cout << "Load the second PMT type hits" << G4endl;
+
+    G4int collectionID2 = SDman->GetCollectionID(WCIDCollectionName2);
+    if (collectionID2 < 0) {
+      G4cout << "<" << WCIDCollectionName2 << "> is not found. Skipping hybrid DAQ." << G4endl;
+      return;  // safe for water-only mode
+    }
+
+    WCHC2 = (WCSimWCHitsCollection*)HCE->GetHC(collectionID2);
+    if (!WCHC2) {
+      G4cout << "Hybrid hit collection pointer is null for <" << WCIDCollectionName2
+             << ">. Skipping hybrid DAQ." << G4endl;
+      return;
+    }
+  
+  }
+  */
+  
+  //JR EDIT END
+  
+  
 
   G4SDManager* SDman = G4SDManager::GetSDMpointer();
 

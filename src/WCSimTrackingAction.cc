@@ -9,7 +9,16 @@
 #include "WCSimTrackInformation.hh"
 #include "WCSimTrackingMessenger.hh"
 #include "WCSimPrimaryGeneratorAction.hh"
+#include "G4PhysicalConstants.hh"
+#include "G4SystemOfUnits.hh"
 
+#include "G4ProcessManager.hh"
+#include "G4ProcessVector.hh"
+
+// --- NEW: pion analysis ---
+#include <cstdlib>   // std::abs(int)
+#include "WCSimAncestryMap.hh"
+#include "WCSimSecondaryTrackTree.hh"
 #include "G4PhysicalConstants.hh"
 #include "G4SystemOfUnits.hh"
 
@@ -64,11 +73,109 @@ WCSimTrackingAction::~WCSimTrackingAction(){;}
 
 void WCSimTrackingAction::PreUserTrackingAction(const G4Track* aTrack)
 {
-  //TF: userdefined now
-  //G4double percentageOfCherenkovPhotonsToDraw = 100.0;
-  // if larger than zero, will keep trajectories of many secondaries as well
-  // and store them in output file. Difficult to control them all, so best only
-  // use for visualization, not for storing in ROOT.
+
+// ================================================================
+// PION ANALYSIS — Step 1: register every track in the ancestry map.
+// This must happen before any of this track's secondaries are stepped.
+// ================================================================
+if (aTrack) {
+  const G4ThreeVector vtx = aTrack->GetVertexPosition();
+  const G4VProcess*   cp  = aTrack->GetCreatorProcess();
+
+  AncestryMap_Register(
+      aTrack->GetTrackID(),
+      aTrack->GetDefinition()->GetPDGEncoding(),
+      aTrack->GetParentID(),
+      (float)(aTrack->GetKineticEnergy() / MeV),
+      (float)(vtx.x() / cm),
+      (float)(vtx.y() / cm),
+      (float)(vtx.z() / cm),
+      (float)(aTrack->GetGlobalTime() / ns),
+      cp ? std::string(cp->GetProcessName()) : "");
+}
+
+// ================================================================
+// PION ANALYSIS — Step 2: cache birth info for any "interesting"
+// secondary (π, μ, Michel e, conv e, nuclear fragment, …).
+// The end kinematics are added in PostUserTrackingAction.
+// ================================================================
+if (aTrack) {
+  const int         pdg     = aTrack->GetDefinition()->GetPDGEncoding();
+  const G4VProcess* cp      = aTrack->GetCreatorProcess();
+  const std::string creator = cp ? std::string(cp->GetProcessName()) : "";
+
+  // B1 FIX: a track is suspended and resumed many times, and Geant4 calls
+  // PreUserTrackingAction on EVERY resume.  Cache birth info only the first
+  // time this track is seen, so x0/y0/z0/t0/ke0 stay the true track origin
+  // instead of being overwritten with the resume point on each segment.
+  if (SecTrack_IsInteresting(pdg, creator) &&
+      !g_secTrackBuffer.count(aTrack->GetTrackID())) {
+
+    // Look up parent PDG from the ancestry map
+    int parentPDG = 0;
+    {
+      auto it = g_trackAncestry.find(aTrack->GetParentID());
+      if (it != g_trackAncestry.end()) parentPDG = it->second.pdg;
+    }
+
+    SourceCategory cat = kOther;
+    int         srcTrk=-1, srcPDG=0, ancTrk=-1, ancPDG=0;
+    float       srcKE0=0.f, ancKE0=0.f;
+    std::string srcC, ancC;
+
+    if (aTrack->GetParentID() == 0) {
+      // Primary particle: categorise by PDG so a non-pion primary (e.g. a
+      // muon) isn't mislabeled kPrimaryPion.
+      if (std::abs(pdg) == 211 || pdg == 111) cat = kPrimaryPion;
+      else if (std::abs(pdg) == 13)           cat = kMuon;
+      else                                    cat = kOther;
+      srcTrk = aTrack->GetTrackID();
+      srcPDG = pdg;
+      ancTrk = aTrack->GetTrackID();
+      ancPDG = pdg;
+      srcKE0 = ancKE0 = (float)(aTrack->GetKineticEnergy() / MeV);
+      srcC = ancC = "";
+    } else {
+      cat = AncestryMap_ClassifyTrack(
+          aTrack->GetTrackID(),
+          pdg,
+          aTrack->GetParentID(),
+          creator,
+          srcTrk, srcPDG, srcKE0, srcC,
+          ancTrk, ancPDG, ancKE0, ancC);
+    }
+
+    const G4ThreeVector vtx = aTrack->GetVertexPosition();
+    SecTrackBuffer buf;
+    buf.evt        = g_wcsim_evt;
+    buf.trk        = aTrack->GetTrackID();
+    buf.pdg        = pdg;
+    buf.parent_trk = aTrack->GetParentID();
+    buf.parent_pdg = parentPDG;
+    buf.creator    = creator;
+    buf.src_cat    = (int)cat;
+    buf.x0_cm      = (float)(vtx.x() / cm);
+    buf.y0_cm      = (float)(vtx.y() / cm);
+    buf.z0_cm      = (float)(vtx.z() / cm);
+    buf.t0_ns      = (float)(aTrack->GetGlobalTime() / ns);
+    buf.ke0_MeV    = (float)(aTrack->GetKineticEnergy() / MeV);
+    buf.src_trk     = srcTrk;
+    buf.src_pdg     = srcPDG;
+    buf.src_ke0_MeV = srcKE0;
+    buf.src_creator = srcC;
+    buf.anc_trk     = ancTrk;
+    buf.anc_pdg     = ancPDG;
+    buf.anc_ke0_MeV = ancKE0;
+    buf.anc_creator = ancC;
+    const G4ThreeVector dir0 = aTrack->GetMomentumDirection();
+    buf.px0 = (float)dir0.x();
+    buf.py0 = (float)dir0.y();
+    buf.pz0 = (float)dir0.z();
+    SecondaryTracksTree_CacheBirth(aTrack->GetTrackID(), buf);
+  }
+}
+
+
 
   if ( aTrack->GetDefinition() != G4OpticalPhoton::OpticalPhotonDefinition()
        || G4UniformRand() < percentageOfCherenkovPhotonsToDraw/100. )
@@ -98,8 +205,9 @@ void WCSimTrackingAction::PreUserTrackingAction(const G4Track* aTrack)
       if (aTrack->GetCreatorProcess()->GetProcessName() == "conv") {
           primaryGenerator->FoundConversion();
       }
-      G4EventManager::GetEventManager()->AbortCurrentEvent();
-      G4EventManager::GetEventManager()->GetNonconstCurrentEvent()->SetEventAborted();
+      //JR EDIT - UNCOMMENT FOR ORIGINAL CODE BELOW
+      //G4EventManager::GetEventManager()->AbortCurrentEvent();
+      //G4EventManager::GetEventManager()->GetNonconstCurrentEvent()->SetEventAborted();
     }
   }
 
@@ -121,14 +229,61 @@ void WCSimTrackingAction::PreUserTrackingAction(const G4Track* aTrack)
   	// First track of the decay save time
   	fTime_birth = aTrack->GetGlobalTime(); 
   }
+
+
+
+  // ---------------------------------------------------------
+//JR EDIT END
 }
 
 void WCSimTrackingAction::PostUserTrackingAction(const G4Track* aTrack)
 {
+// ================================================================
+// PION ANALYSIS — fill secondary_tracks end info for this track
+// ================================================================
+// B1 FIX: PostUserTrackingAction also fires on every SUSPEND, not just at
+// the true end of the track.  Filling there produced one row per track
+// segment (486 contiguous rows for a single 235 MeV muon).  Emit a row only
+// once the track has actually finished, so secondary_tracks holds exactly
+// one row per track: x0/ke0 = birth, x1/ke1 = death.
+const G4TrackStatus secTrkStatus = aTrack ? aTrack->GetTrackStatus() : fAlive;
+const bool secTrkFinished = (secTrkStatus == fStopAndKill ||
+                             secTrkStatus == fKillTrackAndSecondaries);
+
+if (aTrack && secTrkFinished && g_secTrackBuffer.count(aTrack->GetTrackID())) {
+
+  const G4ThreeVector endpos = aTrack->GetPosition();
+
+  const G4VProcess* endProc = nullptr;
+  if (aTrack->GetStep() && aTrack->GetStep()->GetPostStepPoint())
+    endProc = aTrack->GetStep()->GetPostStepPoint()->GetProcessDefinedStep();
+  std::string endProcName = endProc ? std::string(endProc->GetProcessName()) : "NONE";
+
+  // A2 FIX: GetProcessDefinedStep() on the post-step point reports the
+  // along-step process (e.g. "Scintillation") for a track that dies at
+  // rest, not the AtRest process that actually terminated it. For pion/
+  // muon tracks, WCSimSteppingAction has already resolved the true
+  // terminating process into g_trackEndProc — prefer it when present.
+  {
+    auto ep = g_trackEndProc.find(aTrack->GetTrackID());
+    if (ep != g_trackEndProc.end() && !ep->second.empty())
+      endProcName = ep->second;
+  }
+  const G4ThreeVector dir1 = aTrack->GetMomentumDirection();
+
+  SecondaryTracksTree_FillEnd(
+      aTrack->GetTrackID(),
+      (float)(endpos.x() / cm),
+      (float)(endpos.y() / cm),
+      (float)(endpos.z() / cm),
+      (float)(aTrack->GetGlobalTime() / ns),
+      (float)(aTrack->GetKineticEnergy() / MeV),
+      (float)dir1.x(), (float)dir1.y(), (float)dir1.z(),  
+      endProcName);
+}
+
   // added by M Fechner
   const G4VProcess* creatorProcess = aTrack->GetCreatorProcess();
-  //  if ( creatorProcess )
-
 
   WCSimTrackInformation* anInfo;
   if (aTrack->GetUserInformation())

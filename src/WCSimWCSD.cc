@@ -1,9 +1,7 @@
 #include "WCSimWCSD.hh"
-
 #include "WCSimSteppingAction.hh"
 #include "WCSimDetectorConstruction.hh"
 #include "WCSimTrackInformation.hh"
-
 #include "G4ParticleTypes.hh"
 #include "G4HCofThisEvent.hh"
 #include "G4TouchableHistory.hh"
@@ -14,10 +12,16 @@
 #include "Randomize.hh"
 #include "G4ios.hh"
 
+#include "WCSimPionSourceTree.hh"
+
 #include "G4PhysicalConstants.hh"
 #include "G4SystemOfUnits.hh"
+#include <unordered_set>
 
 #include <sstream>
+
+#include "TTree.h"
+#include <string>
 
 
 WCSimWCSD::WCSimWCSD(G4String CollectionName,
@@ -75,6 +79,10 @@ G4bool WCSimWCSD::ProcessHits(G4Step* aStep, G4TouchableHistory*)
   G4StepPoint*       preStepPoint = aStep->GetPreStepPoint();
   G4TouchableHandle  theTouchable = preStepPoint->GetTouchableHandle();
   G4VPhysicalVolume* thePhysical  = theTouchable->GetVolume();
+
+
+
+
 
   // Triggered by photons from InteriorWCPMT hitting photocathode 
   if (thePhysical->GetName()=="InteriorWCPMT") return ProcessHits_boundary(aStep,0);
@@ -193,6 +201,18 @@ G4bool WCSimWCSD::ProcessHits(G4Step* aStep, G4TouchableHistory*)
   else if(detectorElement=="tankPMT2") replicaNumber = WCSimDetectorConstruction::GetTubeID2(tubeTag.str());
   else if(detectorElement=="OD") replicaNumber = WCSimDetectorConstruction::GetODTubeID(tubeTag.str());
   else G4cout << "detectorElement not defined..." << G4endl;
+  // Mark this photon as having hit a PMT in the pion_photons birth cache
+  {
+    const G4Track* currentTrack = aStep->GetTrack();
+    auto it_birth = g_allPhotonBirth.find(currentTrack);
+    if (it_birth != g_allPhotonBirth.end()) {
+      it_birth->second.hit_pmt_id = (int)replicaNumber;
+    }
+  }
+// NOTE: PionPhotonsTree_NotePE is called below, INSIDE the accepted-hit block
+// (past both the QE roll and the angular-efficiency roll), next to AddPe, so
+// the per-PE truth recorded here matches the PEs that feed the digitizer.
+
 
   G4double theta_angle = 0.;
   G4double effectiveAngularEfficiency = 0.;
@@ -212,8 +232,11 @@ G4bool WCSimWCSD::ProcessHits(G4Step* aStep, G4TouchableHistory*)
   }else if (fdet->GetPMT_QE_Method() == 3){
     ratio = 1./(1.-0.25);
     photonQE = fdet->GetPMTQE(WCCollectionName, wavelength,1,200,660,ratio);
+    //photonQE = 0.5; //JR try making QE uniform for a test
   }
-  
+
+// G4cout<<fdet->GetPMT_QE_Method()<<G4endl;
+ // G4cout<<photonQE<<G4endl;  
   if (G4UniformRand() <= photonQE){
     
      G4double local_x = localPosition.x();
@@ -221,6 +244,20 @@ G4bool WCSimWCSD::ProcessHits(G4Step* aStep, G4TouchableHistory*)
      G4double local_z = localPosition.z();
      theta_angle = acos(fabs(local_z)/sqrt(pow(local_x,2)+pow(local_y,2)+pow(local_z,2)))/3.1415926*180.;
      effectiveAngularEfficiency = fdet->GetPMTCollectionEfficiency(theta_angle, volumeName);
+    // G4cout << "Theta "<< theta_angle
+    // << "ang_eff " << effectiveAngularEfficiency <<G4endl;	     
+/*
+     static int qprint = 0;
+if (qprint < 20) {
+  G4cout << "JR QE debug: wl=" << wavelength
+         << " photonQE=" << photonQE
+         << " theta=" << theta_angle
+         << " collEff=" << effectiveAngularEfficiency
+         << " method=" << fdet->GetPMT_QE_Method()
+         << G4endl;
+  qprint++;
+}
+*/
 
      if (G4UniformRand() <= effectiveAngularEfficiency || fdet->UsePMT_Coll_Eff()==0){
        //Retrieve the pointer to the appropriate hit collection. 
@@ -236,6 +273,46 @@ G4bool WCSimWCSD::ProcessHits(G4Step* aStep, G4TouchableHistory*)
        if(!trackinfo)
            trackinfo = new WCSimTrackInformation();
        trackinfo->SetProducesHit(true);
+
+       // Record this accepted PE (per-PE truth) for the pion_photons PE-bridge.
+       // Keyed on (eventID, photon trackID) -- the same key GetPE uses at photon
+       // termination in WCSimSteppingAction.  Placed past both the QE roll and
+       // the angular-efficiency roll so it matches the PEs that feed the digitizer.
+       PionPhotonsTree_NotePE(currentEvent ? currentEvent->GetEventID() : -1,
+                              trackID,
+                              (int)replicaNumber,
+                              (float)(hitTime / ns),
+                              (float)wavelength);
+      /*
+       // ===== JR: compute cos_inc for this accepted PE (once) =====
+float cos_inc_f = -999.f;
+{
+  auto* pre  = aStep->GetPreStepPoint();
+  auto* post = aStep->GetPostStepPoint();
+  const G4ThreeVector dir = pre->GetMomentumDirection(); // unit
+
+  // pre-side normal
+  auto preTouch = pre->GetTouchableHandle();
+  auto preSolid = preTouch->GetSolid();
+  auto preLocal = preTouch->GetHistory()->GetTopTransform().TransformPoint(pre->GetPosition());
+  auto npre_w   = preTouch->GetHistory()->GetTopTransform()
+                    .TransformAxis(preSolid->SurfaceNormal(preLocal)).unit();
+  double cos_pre = -dir.dot(npre_w);
+
+  // post-side normal
+  auto postTouch = post->GetTouchableHandle();
+  auto postSolid = postTouch->GetSolid();
+  auto postLocal = postTouch->GetHistory()->GetTopTransform().TransformPoint(post->GetPosition());
+  auto npost_w   = postTouch->GetHistory()->GetTopTransform()
+                    .TransformAxis(postSolid->SurfaceNormal(postLocal)).unit();
+  double cos_post = -dir.dot(npost_w);
+
+  double cos_inc = std::max(cos_pre, cos_post);
+  cos_inc = std::max(-1.0, std::min(1.0, cos_inc));
+  cos_inc_f = (float)cos_inc;
+}
+//JR END EDIT
+*/
 
        // If this tube hasn't been hit add it to the collection
        if (PMTHitMap[replicaNumber] == 0)
@@ -254,6 +331,10 @@ G4bool WCSimWCSD::ProcessHits(G4Step* aStep, G4TouchableHistory*)
 	   newHit->SetPos(aTrans.NetTranslation());
 	   // Set the hitMap value to the collection hit number
 	   PMTHitMap[replicaNumber] = hitsCollection->insert( newHit );
+
+	   
+//	   (*hitsCollection)[PMTHitMap[replicaNumber]-1]->AddCosInc(cos_inc_f);
+	   
 	   (*hitsCollection)[PMTHitMap[replicaNumber]-1]->AddPe(hitTime);
      (*hitsCollection)[PMTHitMap[replicaNumber]-1]->AddTrackID(trackID);
 	   (*hitsCollection)[PMTHitMap[replicaNumber]-1]->AddParentID(parentSavedTrackID);
@@ -271,6 +352,9 @@ G4bool WCSimWCSD::ProcessHits(G4Step* aStep, G4TouchableHistory*)
 	     
 	 }
        else {
+
+//	 (*hitsCollection)[PMTHitMap[replicaNumber]-1]->AddCosInc(cos_inc_f);
+
 	 (*hitsCollection)[PMTHitMap[replicaNumber]-1]->AddPe(hitTime);
    (*hitsCollection)[PMTHitMap[replicaNumber]-1]->AddTrackID(trackID);
 	 (*hitsCollection)[PMTHitMap[replicaNumber]-1]->AddParentID(parentSavedTrackID);
@@ -292,6 +376,139 @@ G4bool WCSimWCSD::ProcessHits(G4Step* aStep, G4TouchableHistory*)
 
 G4bool WCSimWCSD::ProcessHits_boundary(G4Step* aStep, G4TouchableHistory*)
 { 
+  
+  //JR EDIT BEGIN
+  
+
+/* UNCOMMENT IF THINGS GO WRONG
+  // ===== JR DEBUG: unconditional Fill for optical photons (no creator filter) =====
+  if (pmt_photon_tree) {
+    G4Track* trk = aStep->GetTrack();
+    if (trk && trk->GetDefinition()->GetPDGEncoding() == 0) { // optical photon
+     
+      const G4Event* gevt = G4RunManager::GetRunManager()->GetCurrentEvent();
+      b_evt  = gevt ? gevt->GetEventID() : -1;
+
+        b_par = trk->GetParentID();
+        b_trk  = trk->GetTrackID();
+        b_pdg      = trk->GetDefinition()->GetPDGEncoding();
+
+        // emission (vertex) info
+        b_ex_cm = trk->GetVertexPosition().x()/cm;
+        b_ey_cm = trk->GetVertexPosition().y()/cm;
+        b_ez_cm = trk->GetVertexPosition().z()/cm;
+        b_et_ns = (trk->GetGlobalTime() - trk->GetLocalTime())/ns;
+	
+	// Emission direction (as stored at track vertex). This can be (0,0,0) sometimes.
+	//G4ThreeVector edir = trk->GetVertexMomentumDirection();
+
+	// --- Photon direction at PMT boundary (robust) ---
+G4StepPoint* post = aStep->GetPostStepPoint();
+G4ThreeVector edir = post->GetMomentumDirection();
+
+b_edir_x = (float)edir.x();
+b_edir_y = (float)edir.y();
+b_edir_z = (float)edir.z();
+
+
+        // detection point = where it hits the PMT boundary
+        G4StepPoint* pre = aStep->GetPreStepPoint();
+        b_dx_cm = pre->GetPosition().x()/cm;
+        b_dy_cm = pre->GetPosition().y()/cm;
+        b_dz_cm = pre->GetPosition().z()/cm;
+        b_dt_ns = pre->GetGlobalTime()/ns;
+
+        // photon energies
+        b_Estart_MeV = trk->GetVertexKineticEnergy()/MeV;
+        b_Eend_MeV   = trk->GetKineticEnergy()/MeV;
+
+      if (b_Eend_MeV > 0) {
+        const double hc_MeV_nm = 1.239841984e-3; // MeV*nm
+        b_lambda_nm = hc_MeV_nm / b_Eend_MeV;
+      } else {
+        b_lambda_nm = -1.0;
+      }
+
+      // leave PMT id dummy for now
+      b_pmt = 0;
+
+      // creator string (if you have it)
+      const G4VProcess* cp = trk->GetCreatorProcess();
+      if (cp) {
+        // if your branch is std::string:
+        b_creator = cp->GetProcessName();
+        // if your branch is char array, replace with:
+        // std::snprintf(b_creator, sizeof(b_creator), "%s", cp->GetProcessName().c_str());
+      } else {
+        b_creator = "NULL";
+      }
+
+      pmt_photon_tree->Fill();
+    }
+  }
+*/
+
+  /*
+  static int jr_calls = 0;
+if (jr_calls < 5) {
+  G4cout << "JR: ProcessHits_boundary called vol="
+         << aStep->GetPreStepPoint()->GetTouchableHandle()->GetVolume()->GetName()
+         << " pdg=" << aStep->GetTrack()->GetDefinition()->GetPDGEncoding()
+         << " parentID=" << aStep->GetTrack()->GetParentID()
+         << G4endl;
+  jr_calls++;
+}
+    // ---- JR DEBUG: minimal fill test ----
+  if (pmt_photon_tree) {
+    G4Track* trk = aStep->GetTrack();
+    if (trk && trk->GetDefinition()->GetPDGEncoding() == 0) { // optical photon
+      const G4VProcess* cp = trk->GetCreatorProcess();
+      if (cp && cp->GetProcessName() == "Cerenkov") {
+
+        const G4Event* gevt = G4RunManager::GetRunManager()->GetCurrentEvent();
+        b_evt  = gevt ? gevt->GetEventID() : -1;
+
+        b_par = trk->GetParentID();
+        b_trk  = trk->GetTrackID();
+        b_pdg      = trk->GetDefinition()->GetPDGEncoding();
+
+        // emission (vertex) info
+        b_ex_cm = trk->GetVertexPosition().x()/cm;
+        b_ey_cm = trk->GetVertexPosition().y()/cm;
+        b_ez_cm = trk->GetVertexPosition().z()/cm;
+        b_et_ns = (trk->GetGlobalTime() - trk->GetLocalTime())/ns;
+
+        // detection point = where it hits the PMT boundary
+        G4StepPoint* pre = aStep->GetPreStepPoint();
+        b_dx_cm = pre->GetPosition().x()/cm;
+        b_dy_cm = pre->GetPosition().y()/cm;
+        b_dz_cm = pre->GetPosition().z()/cm;
+        b_dt_ns = pre->GetGlobalTime()/ns;
+
+        // photon energies
+        b_Estart_MeV = trk->GetVertexKineticEnergy()/MeV;
+        b_Eend_MeV   = trk->GetKineticEnergy()/MeV;
+
+        // wavelength from end energy (E in MeV)
+        if (b_Eend_MeV > 0) {
+          const double hc_MeV_nm = 1.239841984e-3; // MeV*nm
+          b_lambda_nm = hc_MeV_nm / b_Eend_MeV;
+        } else {
+          b_lambda_nm = -1.0;
+        }
+
+        // TEMP: set PMT id to replicaNumber later; for now just 0
+        b_pmt = 0;
+
+        pmt_photon_tree->Fill();
+      }
+    }
+  }
+  // ---- END JR DEBUG ----
+  */
+
+//JR EDIT END
+	
   G4StepPoint*       preStepPoint = aStep->GetPreStepPoint();
   G4StepPoint*       postStepPoint = aStep->GetPostStepPoint();
   G4TouchableHandle  theTouchable = postStepPoint->GetTouchableHandle();
@@ -361,7 +578,15 @@ G4bool WCSimWCSD::ProcessHits_boundary(G4Step* aStep, G4TouchableHistory*)
   else if(detectorElement=="tankPMT2") replicaNumber = WCSimDetectorConstruction::GetTubeID2(tubeTag.str());
   else if(detectorElement=="OD") replicaNumber = WCSimDetectorConstruction::GetODTubeID(tubeTag.str());
   else G4cout << "detectorElement not defined..." << G4endl;
-
+  // Mark this photon as having hit a PMT in the pion_photons birth cache
+  {
+    const G4Track* currentTrack = aStep->GetTrack();
+    auto it_birth = g_allPhotonBirth.find(currentTrack);
+    if (it_birth != g_allPhotonBirth.end()) {
+      it_birth->second.hit_pmt_id = (int)replicaNumber;
+      
+    }
+  }
   G4double theta_angle = 0.;
   G4double effectiveAngularEfficiency = 0.;
 
@@ -404,6 +629,16 @@ G4bool WCSimWCSD::ProcessHits_boundary(G4Step* aStep, G4TouchableHistory*)
       if(!trackinfo)
           trackinfo = new WCSimTrackInformation();
       trackinfo->SetProducesHit(true);
+
+      // Record this accepted PE (per-PE truth) for the pion_photons PE-bridge.
+      // Same key/placement rationale as in ProcessHits: keyed on (eventID,
+      // photon trackID), past both the QE and angular-efficiency rolls.  This
+      // covers the mPMT / InteriorWCPMT boundary path.
+      PionPhotonsTree_NotePE(currentEvent ? currentEvent->GetEventID() : -1,
+                             trackID,
+                             (int)replicaNumber,
+                             (float)(hitTime / ns),
+                             (float)wavelength);
 
       // If this tube hasn't been hit add it to the collection
       if (PMTHitMap[replicaNumber] == 0)
