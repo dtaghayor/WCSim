@@ -1,3 +1,22 @@
+> ### This is a fork of WCSim, not upstream
+>
+> It adds truth-level bookkeeping for charged-pion interactions — three ROOT
+> trees (`pion_steps`, `secondary_tracks`, `pion_photons`) plus a full
+> track-ancestry map — for π⁺/π⁻ topology and Michel-electron studies in WCTE.
+> It also fixes several truth-recording bugs, most importantly that a particle
+> dying **at rest** (a stopping pion's decay, π⁻/μ⁻ capture) was never recorded.
+>
+> **Start here: [`pion_analysis_tools/README.md`](pion_analysis_tools/README.md)**
+> — what was added, how to build and run it, and how it was validated.
+> Read [`pion_analysis_tools/OUTPUT_CONVENTIONS.md`](pion_analysis_tools/OUTPUT_CONVENTIONS.md)
+> before using the output: units, the `src_cat` legend, per-tree semantics, and
+> which vertices must be filtered out.
+>
+> Everything below this line is the upstream WCSim README, unchanged.
+> Upstream lives at [WCSim/WCSim](https://github.com/WCSim/WCSim).
+
+---
+
 # Welcome to WCSim
 
 WCSim is a very flexible Geant4-based program for developing and
