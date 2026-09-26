@@ -122,6 +122,62 @@ simply changes direction. Keep those rows.
 This was only diagnosable once optical photons were removed from
 `n_secondaries`; under the old padded counting these vertices were invisible.
 
+#### How at-rest death is detected, and why it used to be missing
+
+Worth understanding, because the naive approach silently loses every stopping
+particle.
+
+When a charged particle ranges out, Geant4 does not kill it on the step where
+its energy reaches zero. The AtRest process (decay or nuclear capture) runs in a
+**separate, zero-length step**: same position, same time, `ke_pre = ke_post = 0`,
+and it is that step which ends the track with `fStopAndKill`.
+
+The trap is that `GetPostStepPoint()->GetProcessDefinedStep()` on that step does
+**not** report the AtRest process. It reports the last along-step process — in
+this build, `Scintillation`. So code that identifies vertices by process name
+never matches, and stopping particles produce no vertex at all. Before this was
+fixed, a 1000-event stopping-μ⁺ run recorded exactly **one** `pion_steps` row,
+and `st_end_process` read `Scintillation` for 999 of 1000 primaries.
+
+Two things make the fix work:
+
+**Detect at rest with `ke_pre`, not `ke_post`.** `fStopAndKill` alone is not
+enough, because an in-flight inelastic interaction also ends the track — and it
+also has `ke_post ≈ 0`. Measured on the 10k π⁺ run:
+
+| vertex | n | of which `ke_post ≈ 0` | max `ke_pre` |
+|---|---:|---:|---:|
+| `Decay`, at rest              | 13234 | 13234 | 0.00 MeV |
+| `hBertiniCaptureAtRest`       |    28 |    28 | 0.00 MeV |
+| `pi+Inelastic`, in flight     |  6273 |  6223 | 198.00 MeV |
+| `hadElastic`, in flight       |  7177 |     0 | 198.00 MeV |
+
+Keying on `ke_post ≈ 0` would have mislabelled **6223 in-flight inelastic
+vertices** as at-rest. `ke_pre` separates them cleanly: it is ~0 only when the
+particle had already stopped.
+
+(Incidentally, the 50 `pi+Inelastic` rows that do *not* have `ke_post ≈ 0` are
+exactly the 50 null vertices described above — the pion survives with energy,
+which is why the track continues. Two independent measurements agreeing.)
+
+**Recover the process name from the secondaries.** Since the post-step point is
+unreliable at rest, the true process is read from the creator process of the
+non-optical secondaries the step produced: an at-rest π⁺ decay yields a μ⁺ whose
+creator is `Decay`; a π⁻ capture yields fragments whose creator is
+`hBertiniCaptureAtRest`. Optical photons are skipped, and this lookup is applied
+**only** at rest — using it in flight would overwrite a genuine `pi+Inelastic`
+with `Cerenkov`, since in-flight steps also spawn Cherenkov photons. Rows where
+nothing could be resolved are labelled `StopAndKill_AtRest`; on the 10k run there
+were none.
+
+> **This is not a defect in upstream WCSim.** Upstream never records how a track
+> ends — `WCSimRootTrack` stores `fCreatorProcess`, `fStopvol` and `fStop`, but
+> no terminating-process field — so it cannot get this wrong. Its only uses of
+> `GetProcessDefinedStep` are on optical photons (`WCSimTrajectory`,
+> `WCSimSteppingAction`) or test for `"conv"` (`WCSimTrackingAction`), a process
+> that never occurs at rest. The trap is one that any code *adding* end-of-track
+> truth bookkeeping will hit, which is why it is written down here.
+
 ## The stock `track_*` truth tree — NOT part of this modification
 
 `track_*` is WCSim's original `jhfNtuple` geant tree. Its quirks are upstream
