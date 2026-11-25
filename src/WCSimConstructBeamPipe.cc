@@ -149,10 +149,15 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructBeamPipe()
   visMylar->SetVisibility(true); visMylar->SetForceSolid(true);
 
   // -- Positioning Logic --
-  // Starts in Z at: 5 mm from the start of the pipe
-  // The start of the beam pipe volume is at z=0 in this Polycone construction.
-  G4double z_assembly_start = 5.0 * mm;
-  G4double z_assembly_center = z_assembly_start + (totalAssemblyThickness / 2.0);
+  // The start of the beam pipe volume is at z=0 in this Polycone construction
+  // (tank-wall end, where the beam enters); the window is at
+  // z = pmt_blacksheet_offset + window_blacksheet_distance.
+  // T5 is placed against the window end: its downstream face is 5 mm before
+  // the window and the assembly extends upstream from there.
+  // Ported from Martiloris/WCSim (Loris, "Corrected T5 position"); previously
+  // the assembly started 5 mm from the tank-wall end of the pipe.
+  G4double z_assembly_start = pmt_blacksheet_offset + window_blacksheet_distance - 5.0 * mm;
+  G4double z_assembly_center = z_assembly_start - (totalAssemblyThickness / 2.0);
 
   // Calculate Start Y to center the stack vertically
   G4double totalStackHeight = nBars * barHeight; 
