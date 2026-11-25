@@ -28,6 +28,32 @@ WCSimPrimaryGeneratorMessenger::WCSimPrimaryGeneratorMessenger(WCSimPrimaryGener
 
   genSet = false;
 
+  // GPS beam spot: truncated 2D Gaussian (ported from Martiloris/WCSim, Loris/Thorsten)
+  gpsBeamPipeDiameterCmd = new G4UIcmdWithADoubleAndUnit("/mygen/gpsBeamPipeDiameter", this);
+  gpsBeamPipeDiameterCmd->SetGuidance("GPS only: smear the primary vertex with a 2D Gaussian in the plane");
+  gpsBeamPipeDiameterCmd->SetGuidance("transverse to the beam direction, keeping only points inside this diameter");
+  gpsBeamPipeDiameterCmd->SetGuidance("(the T5 acceptance). Centre = the /gps/position point. 0 disables (default).");
+  gpsBeamPipeDiameterCmd->SetParameterName("diameter", false);
+  gpsBeamPipeDiameterCmd->SetRange("diameter >= 0");
+  gpsBeamPipeDiameterCmd->SetUnitCategory("Length");
+  gpsBeamPipeDiameterCmd->SetDefaultUnit("cm");
+
+  gpsBeamSigmaXCmd = new G4UIcmdWithADoubleAndUnit("/mygen/gpsBeamSigmaX", this);
+  gpsBeamSigmaXCmd->SetGuidance("GPS beam spot: Gaussian sigma along the first transverse axis");
+  gpsBeamSigmaXCmd->SetGuidance("(global x for a beam along +-z). Used only if /mygen/gpsBeamPipeDiameter > 0.");
+  gpsBeamSigmaXCmd->SetParameterName("sigmaX", false);
+  gpsBeamSigmaXCmd->SetRange("sigmaX >= 0");
+  gpsBeamSigmaXCmd->SetUnitCategory("Length");
+  gpsBeamSigmaXCmd->SetDefaultUnit("cm");
+
+  gpsBeamSigmaYCmd = new G4UIcmdWithADoubleAndUnit("/mygen/gpsBeamSigmaY", this);
+  gpsBeamSigmaYCmd->SetGuidance("GPS beam spot: Gaussian sigma along the second transverse axis");
+  gpsBeamSigmaYCmd->SetGuidance("(global y for a beam along +-z). Used only if /mygen/gpsBeamPipeDiameter > 0.");
+  gpsBeamSigmaYCmd->SetParameterName("sigmaY", false);
+  gpsBeamSigmaYCmd->SetRange("sigmaY >= 0");
+  gpsBeamSigmaYCmd->SetUnitCategory("Length");
+  gpsBeamSigmaYCmd->SetDefaultUnit("cm");
+
   //C. Vilela: Adding PMTPoisson for generating photoelectrons directly on PMTs according to a Poisson distribution.
   poisCmd = new G4UIcmdWithABool("/mygen/pmtPoisson",this);
   poisCmd->SetGuidance("Flag for generating photoelectrons directly on PMTs according to a Poisson distribution. These PE's will be generated in addition to light produce by any particles generated. Set dark rate to 0 and do not generate any particles for events with only Poisson PE's.");
@@ -244,6 +270,9 @@ WCSimPrimaryGeneratorMessenger::~WCSimPrimaryGeneratorMessenger()
   delete radonScalingCmd;
   delete radonGeoSymCmd;
   delete radonWaterConcCmd;
+  delete gpsBeamPipeDiameterCmd;
+  delete gpsBeamSigmaXCmd;
+  delete gpsBeamSigmaYCmd;
   delete radioactive_time_window_Cmd;
   delete nPhotonsCmd;
   delete injectorOnCmd;
@@ -552,6 +581,13 @@ void WCSimPrimaryGeneratorMessenger::SetNewValue(G4UIcommand * command,G4String 
       myAction->SetmPMTledEvtGenerator(true);
     }
   }
+
+  if (command == gpsBeamPipeDiameterCmd)
+    myAction->SetGPSBeamPipeDiameter(gpsBeamPipeDiameterCmd->GetNewDoubleValue(newValue));
+  if (command == gpsBeamSigmaXCmd)
+    myAction->SetGPSBeamSigmaX(gpsBeamSigmaXCmd->GetNewDoubleValue(newValue));
+  if (command == gpsBeamSigmaYCmd)
+    myAction->SetGPSBeamSigmaY(gpsBeamSigmaYCmd->GetNewDoubleValue(newValue));
 
   if( command == fileNameCmd)
   {

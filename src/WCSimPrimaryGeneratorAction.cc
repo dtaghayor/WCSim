@@ -902,6 +902,7 @@ void WCSimPrimaryGeneratorAction::GeneratePrimaries(G4Event* anEvent)
   else if (useGPSEvt)
     {
       MyGPS->GeneratePrimaryVertex(anEvent);
+      if (gpsBeamPipeDiameter > 0.) ApplyGPSBeamSpot(anEvent);
 
       G4ThreeVector P   =anEvent->GetPrimaryVertex()->GetPrimary()->GetMomentum();
       G4ThreeVector vtx =anEvent->GetPrimaryVertex()->GetPosition();
@@ -1744,6 +1745,51 @@ NuHepMC3Reader: [INFO] Particle ID: "
         std::cerr << "          : Use -DWCSISM_HEPMC3_ENABLED=ON at compile time." << std::endl;
     #endif // WCSISM_HEPMC3_ENABLED
     }
+}
+
+// GPS beam spot: move the primary vertex to a point drawn from a 2D Gaussian
+// centred on the GPS vertex, in the plane transverse to the primary momentum,
+// rejecting draws outside radius gpsBeamPipeDiameter/2 (T5 acceptance).
+// Ported from Martiloris/WCSim (Loris/Thorsten); generalised from global x-y
+// to the transverse plane. For a beam along +-z, sigmaX/sigmaY act along
+// global x/y. Only the first primary vertex is moved.
+void WCSimPrimaryGeneratorAction::ApplyGPSBeamSpot(G4Event* anEvent)
+{
+  G4PrimaryVertex* vertex = anEvent->GetPrimaryVertex();
+  if (!vertex || !vertex->GetPrimary()) return;
+
+  const G4ThreeVector p = vertex->GetPrimary()->GetMomentum();
+  if (p.mag2() <= 0.) return;
+  const G4ThreeVector d = p.unit();
+
+  // u: global x projected onto the transverse plane (global y if beam is along x)
+  G4ThreeVector u = G4ThreeVector(1, 0, 0) - d.x() * d;
+  if (u.mag2() < 1e-12) u = G4ThreeVector(0, 1, 0) - d.y() * d;
+  u = u.unit();
+  const G4ThreeVector v = d.cross(u);
+
+  const G4double rmax = 0.5 * gpsBeamPipeDiameter;
+
+  if (!gpsBeamSpotLogged) {
+    G4cout << "GPS beam spot ON: diameter " << gpsBeamPipeDiameter / cm << " cm, sigmaX "
+           << gpsBeamSigmaX / cm << " cm, sigmaY " << gpsBeamSigmaY / cm << " cm, axes u=" << u
+           << " v=" << v << G4endl;
+    if (gpsBeamSigmaX <= 0. && gpsBeamSigmaY <= 0.)
+      G4cout << "WARNING: GPS beam spot has both sigmas = 0; vertex will not be smeared." << G4endl;
+    if (gpsBeamSigmaX > 2. * rmax || gpsBeamSigmaY > 2. * rmax)
+      G4cout << "WARNING: GPS beam spot sigma > diameter; distribution is nearly a uniform disk "
+             << "and rejection sampling is inefficient." << G4endl;
+    gpsBeamSpotLogged = true;
+  }
+
+  G4double a, b;
+  do {
+    a = (gpsBeamSigmaX > 0.) ? G4RandGauss::shoot(0., gpsBeamSigmaX) : 0.;
+    b = (gpsBeamSigmaY > 0.) ? G4RandGauss::shoot(0., gpsBeamSigmaY) : 0.;
+  } while (a * a + b * b > rmax * rmax);
+
+  const G4ThreeVector pos = vertex->GetPosition() + a * u + b * v;
+  vertex->SetPosition(pos.x(), pos.y(), pos.z());
 }
 
 void WCSimPrimaryGeneratorAction::SaveOptionsToOutput(WCSimRootOptions * wcopt)

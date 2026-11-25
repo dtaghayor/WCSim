@@ -61,6 +61,12 @@ public:
   void SetNvtxs(G4int i)     { nvtxs = i; };
   void SetVtxs(G4int i, G4ThreeVector v)     { vtxs[i] = v; };
 
+  // GPS beam spot: truncated 2D Gaussian in the plane transverse to the beam.
+  // Ported from Martiloris/WCSim (Loris/Thorsten). Diameter 0 = disabled.
+  inline void SetGPSBeamPipeDiameter(G4double v) { gpsBeamPipeDiameter = v; }
+  inline void SetGPSBeamSigmaX(G4double v)       { gpsBeamSigmaX = v; }
+  inline void SetGPSBeamSigmaY(G4double v)       { gpsBeamSigmaY = v; }
+
   // These go with jhfNtuple
   G4int GetVecRecNumber(){return vecRecNumber;}
   G4int GetMode(int vertex = 0){return mode[vertex];};
@@ -125,6 +131,13 @@ private:
   G4String vectorFileName;
   G4String cosmicsFileName = "data/MuonFlux-HyperK-ThetaPhi.dat";
   G4bool   GenerateVertexInRock;
+
+  // GPS beam spot (see SetGPSBeamPipeDiameter). Diameter 0 = disabled.
+  G4double gpsBeamPipeDiameter = 0.0;
+  G4double gpsBeamSigmaX = 0.0;
+  G4double gpsBeamSigmaY = 0.0;
+  G4bool   gpsBeamSpotLogged = false;
+  void ApplyGPSBeamSpot(G4Event* anEvent);
 
   // AmBe Generator 
   WCSimAmBeGen* AmBeGen;
