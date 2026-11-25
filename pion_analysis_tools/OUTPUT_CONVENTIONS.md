@@ -266,6 +266,18 @@ modification introduces — do not "fix" them in the sim; handle them in analysi
 - Because of those two rows, `track_id == 0` appears twice per event.
 - **`track_parent` is a PDG code, not a track id** (e.g. 211, −13, 999 sentinel).
   For real parentage use `secondary_tracks.st_parent_trk` instead.
+- **The beam row stores p = E.** The `flag == -1` row (and `WCSimRootTrack::GetP()`
+  for that row) holds the primary's **total energy** in its momentum field. Use
+  √(E² − m²), or the real primary track (`flag == 0` / `track_id == 1`), to get the momentum.
+
+## Beam profile and the truth output
+
+When the `/mygen/gpsBeam*` options are on (see [`BEAM_PROFILE.md`](BEAM_PROFILE.md)),
+each event's **truth start point and energy are the spread values**: the start
+point is per event, not the fixed `/gps/position`, and the energy is per event,
+not the fixed `/gps/energy`. Take both from the event (`GetVtx`, the primary's
+energy), never from the macro. The options in use are printed once per run in
+the WCSim log (`GPS beam spot ON …`, `GPS momentum spread ON …`).
 
 ## Known open items (as of this writing)
 

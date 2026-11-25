@@ -12,6 +12,11 @@
 > before using the output: units, the `src_cat` legend, per-tree semantics, and
 > which vertices must be filtered out.
 >
+> It also adds a realistic WCTE beam for the GPS generator: a spot that has passed
+> through T5 and a Gaussian momentum spread (`/mygen/gpsBeam*`, all off by
+> default), and it moves T5 to the window end of the beam pipe. See
+> [`pion_analysis_tools/BEAM_PROFILE.md`](pion_analysis_tools/BEAM_PROFILE.md).
+>
 > Everything below this line is the upstream WCSim README, unchanged.
 > Upstream lives at [WCSim/WCSim](https://github.com/WCSim/WCSim).
 
