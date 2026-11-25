@@ -903,6 +903,7 @@ void WCSimPrimaryGeneratorAction::GeneratePrimaries(G4Event* anEvent)
   else if (useGPSEvt)
     {
       MyGPS->GeneratePrimaryVertex(anEvent);
+      if (gpsBeamMomSpread > 0.) ApplyGPSMomentumSpread(anEvent);
       if (gpsBeamPipeDiameter > 0. || gpsBeamT5Acceptance) ApplyGPSBeamSpot(anEvent);
 
       G4ThreeVector P   =anEvent->GetPrimaryVertex()->GetPrimary()->GetMomentum();
@@ -1800,6 +1801,40 @@ void WCSimPrimaryGeneratorAction::ApplyGPSBeamSpot(G4Event* anEvent)
 
   const G4ThreeVector pos = vertex->GetPosition() + a * u + b * v;
   vertex->SetPosition(pos.x(), pos.y(), pos.z());
+}
+
+// GPS momentum spread: redraw |p| of every primary in the first vertex from
+// Gauss(p0, f*p0), where p0 is the momentum GPS generated (from /gps/energy,
+// which is kinetic energy) and f = gpsBeamMomSpread = sigma_p/p. Direction is
+// kept. Gaussian in momentum, which is what the beamline collimators define,
+// rather than in kinetic energy (/gps/ene/type Gauss), so no hand conversion
+// sigma_T = (p^2/E) sigma_p/p is needed.
+void WCSimPrimaryGeneratorAction::ApplyGPSMomentumSpread(G4Event* anEvent)
+{
+  G4PrimaryVertex* vertex = anEvent->GetPrimaryVertex();
+  if (!vertex) return;
+
+  for (G4PrimaryParticle* prim = vertex->GetPrimary(); prim; prim = prim->GetNext()) {
+    G4double mass = prim->GetMass();
+    if (mass < 0. && prim->GetParticleDefinition()) mass = prim->GetParticleDefinition()->GetPDGMass();
+    if (mass < 0.) mass = 0.;
+    const G4double p0 = prim->GetTotalMomentum();
+    if (p0 <= 0.) continue;
+
+    G4double p;
+    do { p = G4RandGauss::shoot(p0, gpsBeamMomSpread * p0); } while (p <= 0.);
+    prim->SetKineticEnergy(std::sqrt(p * p + mass * mass) - mass);
+
+    if (!gpsBeamMomSpreadLogged) {
+      const G4double E0 = std::sqrt(p0 * p0 + mass * mass);
+      G4cout << "GPS momentum spread ON: sigma_p/p = " << gpsBeamMomSpread
+             << ", p0 = " << p0 / MeV << " MeV/c (T0 = " << (E0 - mass) / MeV
+             << " MeV), sigma_p = " << gpsBeamMomSpread * p0 / MeV
+             << " MeV/c, equivalent sigma_T ~ " << gpsBeamMomSpread * p0 * p0 / E0 / MeV
+             << " MeV" << G4endl;
+      gpsBeamMomSpreadLogged = true;
+    }
+  }
 }
 
 void WCSimPrimaryGeneratorAction::SaveOptionsToOutput(WCSimRootOptions * wcopt)

@@ -67,6 +67,8 @@ public:
   inline void SetGPSBeamSigmaX(G4double v)       { gpsBeamSigmaX = v; }
   inline void SetGPSBeamSigmaY(G4double v)       { gpsBeamSigmaY = v; }
   inline void SetGPSBeamT5Acceptance(G4bool b)   { gpsBeamT5Acceptance = b; }
+  // Relative Gaussian momentum spread sigma_p/p for GPS primaries (0 = off)
+  inline void SetGPSBeamMomentumSpread(G4double f) { gpsBeamMomSpread = f; }
 
   // These go with jhfNtuple
   G4int GetVecRecNumber(){return vecRecNumber;}
@@ -140,6 +142,11 @@ private:
   G4bool   gpsBeamT5Acceptance = false;
   G4bool   gpsBeamSpotLogged = false;
   void ApplyGPSBeamSpot(G4Event* anEvent);
+
+  // GPS momentum spread (see SetGPSBeamMomentumSpread)
+  G4double gpsBeamMomSpread = 0.0;
+  G4bool   gpsBeamMomSpreadLogged = false;
+  void ApplyGPSMomentumSpread(G4Event* anEvent);
 
   // AmBe Generator 
   WCSimAmBeGen* AmBeGen;

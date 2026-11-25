@@ -61,6 +61,13 @@ WCSimPrimaryGeneratorMessenger::WCSimPrimaryGeneratorMessenger(WCSimPrimaryGener
   gpsBeamT5AcceptanceCmd->SetParameterName("useT5", true);
   gpsBeamT5AcceptanceCmd->SetDefaultValue(true);
 
+  gpsBeamMomentumSpreadCmd = new G4UIcmdWithADouble("/mygen/gpsBeamMomentumSpread", this);
+  gpsBeamMomentumSpreadCmd->SetGuidance("GPS only: relative Gaussian momentum spread sigma_p/p (e.g. 0.02 for 2%).");
+  gpsBeamMomentumSpreadCmd->SetGuidance("The central momentum is taken from the GPS energy (/gps/energy = kinetic energy);");
+  gpsBeamMomentumSpreadCmd->SetGuidance("each primary's |p| is redrawn from Gauss(p0, f*p0), direction kept. 0 disables (default).");
+  gpsBeamMomentumSpreadCmd->SetParameterName("sigmaPoverP", false);
+  gpsBeamMomentumSpreadCmd->SetRange("sigmaPoverP >= 0 && sigmaPoverP < 0.5");
+
   //C. Vilela: Adding PMTPoisson for generating photoelectrons directly on PMTs according to a Poisson distribution.
   poisCmd = new G4UIcmdWithABool("/mygen/pmtPoisson",this);
   poisCmd->SetGuidance("Flag for generating photoelectrons directly on PMTs according to a Poisson distribution. These PE's will be generated in addition to light produce by any particles generated. Set dark rate to 0 and do not generate any particles for events with only Poisson PE's.");
@@ -281,6 +288,7 @@ WCSimPrimaryGeneratorMessenger::~WCSimPrimaryGeneratorMessenger()
   delete gpsBeamSigmaXCmd;
   delete gpsBeamSigmaYCmd;
   delete gpsBeamT5AcceptanceCmd;
+  delete gpsBeamMomentumSpreadCmd;
   delete radioactive_time_window_Cmd;
   delete nPhotonsCmd;
   delete injectorOnCmd;
@@ -598,6 +606,8 @@ void WCSimPrimaryGeneratorMessenger::SetNewValue(G4UIcommand * command,G4String 
     myAction->SetGPSBeamSigmaY(gpsBeamSigmaYCmd->GetNewDoubleValue(newValue));
   if (command == gpsBeamT5AcceptanceCmd)
     myAction->SetGPSBeamT5Acceptance(gpsBeamT5AcceptanceCmd->GetNewBoolValue(newValue));
+  if (command == gpsBeamMomentumSpreadCmd)
+    myAction->SetGPSBeamMomentumSpread(gpsBeamMomentumSpreadCmd->GetNewDoubleValue(newValue));
 
   if( command == fileNameCmd)
   {
