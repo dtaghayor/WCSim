@@ -85,8 +85,7 @@ placed further upstream.
 
 ## Validation
 
-All runs used `wcsim_runs/modified/WCTE.mac` geometry. Test files are in
-`/lustre07/scratch/taghayor/wcsim_runs/beamspot_test/`.
+All runs used the WCTE geometry and beam axis from `wcsim_runs/modified/WCTE.mac` (2026-11-25).
 
 - Single geantinos fired back through T5 at chosen offsets: bar length lies
   along global x, bars are stacked along +y, and each bar is hit as predicted.
