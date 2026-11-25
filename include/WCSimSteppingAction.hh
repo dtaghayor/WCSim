@@ -10,6 +10,7 @@
 
 class G4HCofThisEvent;
 class G4Event;
+class WCSimPionAnalysisMessenger;
 
 // First we have a structure to hold the values of the emitted photon.
 typedef struct {
@@ -27,6 +28,7 @@ class WCSimSteppingAction : public G4UserSteppingAction
  private:
   WCSimRunAction* runAction;
   WCSimDetectorConstruction* det;
+  WCSimPionAnalysisMessenger* fPionAnalysisMessenger;
 
 public:
   WCSimSteppingAction(WCSimRunAction*,WCSimDetectorConstruction*);

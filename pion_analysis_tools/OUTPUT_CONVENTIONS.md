@@ -60,6 +60,40 @@ Interesting = π±, π⁰, μ±, Michel/conv e±, π⁰→γ, and nuclear fragme
   track reaches a terminal status, so the row count is the track count.
 - `st_parent_trk` is the **real Geant4 parent track id** (use this for
   parentage). `st_parent_pdg` is the parent PDG.
+- **`len_cm`** is the true path length travelled (`G4Track::GetTrackLength`).
+  Use this, not `|x1-x0|`, which is only the straight-line displacement and
+  ignores multiple scattering.
+
+#### Cherenkov threshold / radiating path length (always filled)
+
+`ckv_len_cm` is the **radiating path length**: how far the track travelled
+while above Cherenkov threshold (beta > 1/n). It is meaningful for every row:
+
+| `ckv_status` | meaning | `ckv_len_cm` |
+|---:|---|---|
+| 0 | never above threshold — produced no Cherenkov light | 0 |
+| 1 | crossed below threshold during tracking | path length at the crossing |
+| 2 | track ended (interacted / left) while still above threshold | = `len_cm` |
+
+`ckv_{x,y,z}_cm`, `ckv_t_ns` and `ckv_ke_MeV` give the crossing point; they are
+linearly interpolated **within** the step in which beta crossed 1/n, so the
+result is not quantised to step boundaries. `ckv_ke_MeV` is the threshold
+kinetic energy for that particle's mass, so it is constant per species:
+
+| particle | threshold KE at n = 1.33 |
+|---|---|
+| e± | 0.264 MeV |
+| μ± | 54.6 MeV |
+| π± | 72.1 MeV |
+| p | 485 MeV |
+
+The refractive index defaults to 1.33 and is settable:
+`/WCSim/PionAnalysis/CherenkovIndex 1.34`. Note this is a single fixed index,
+not the full wavelength-dependent dispersion Geant4 uses to generate photons,
+so `ckv_len_cm` is a well-defined geometric quantity rather than an exact
+count of where the last photon was emitted.
+
+Radiating fraction of a track is simply `ckv_len_cm / len_cm`.
 - `st_end_process` is the true terminating process, including at-rest death
   (see the A1/A2 fix note below).
 
@@ -83,10 +117,11 @@ Records only discrete vertices of π/μ tracks, not every ionisation step:
   | `muMinusCaptureAtRest` | μ− | μ− capture **and** decay-in-orbit (Geant4 reports both under this one name) |
 
   NOTE: π− capture is named **`hBertiniCaptureAtRest`**, not `pi-CaptureAtRest`.
-  The `isInteresting` list in `WCSimSteppingAction.cc` still names
-  `pi±CaptureAtRest`, which this physics list never emits; at-rest rows are
-  recorded anyway because at-rest death is captured regardless of process name.
-  Cut on `ke_pre ≈ 0` rather than on a process-name list.
+  `WCSimSteppingAction.cc` now matches any process whose name contains
+  `CaptureAtRest`, so it is independent of which physics list is used. At-rest
+  rows are additionally recorded regardless of process name, because at-rest
+  death is detected from `ke_pre ~ 0` and `fStopAndKill`. For analysis, cut on
+  `ke_pre ~ 0` rather than on a process-name list.
 - `n_secondaries` = **physics daughters** produced at that vertex. Optical
   (Cherenkov/scintillation) photons are excluded; counting them made this
   branch scale with the emitter's velocity rather than count daughters
@@ -177,6 +212,45 @@ were none.
 > `WCSimSteppingAction`) or test for `"conv"` (`WCSimTrackingAction`), a process
 > that never occurs at rest. The trap is one that any code *adding* end-of-track
 > truth bookkeeping will hit, which is why it is written down here.
+
+### `ionizing_steps` (is_) — OPTIONAL, one row per STEP
+
+**Off by default.** Enable in the steering macro, before `/run/beamOn`:
+
+```
+/WCSim/PionAnalysis/RecordIonizingSteps true
+```
+
+When disabled the tree is not booked at all, so it does not appear in the file
+and costs nothing. Intended for multiple-scattering, path-length and dE/dx
+studies.
+
+Contents: every step of the charged tracks that `secondary_tracks` follows —
+the primary and its charged daughters (π, μ, Michel/conv e±, p, nuclear
+fragments).
+
+| branch | meaning |
+|---|---|
+| `evt, trk, pdg, parent_trk, src_cat` | identity, same conventions as `st_` |
+| `step` | Geant4 step number within the track |
+| `x_cm, y_cm, z_cm, t_ns` | post-step point |
+| `ke_pre_MeV, ke_post_MeV` | kinetic energy across the step |
+| `edep_MeV` | energy deposited in this step |
+| `step_len_cm` | length of this step |
+| `track_len_cm` | cumulative path length after this step |
+| `beta_pre, beta_post` | v/c across the step |
+| `above_ckv` | 1 if `beta_post` is still above threshold |
+| `n_cherenkov` | Cherenkov photons created in this step |
+| `process` | step-limiting process |
+
+**Not included:** delta-ray electrons (creator `muIoni`/`eIoni`/`hIoni`) are
+excluded, because they are not in the `secondary_tracks` interesting set and
+including them would multiply the tree size. If a study needs them, widen
+`SecTrack_IsInteresting`.
+
+**Size.** Measured on 20 pi+ @198 MeV events: ~340 rows/event, and the output
+file grew from 2.48 MB to 2.78 MB (+12%). Extrapolated to 10k events that is
+~3.4M rows. Keep it off for ordinary productions.
 
 ## The stock `track_*` truth tree — NOT part of this modification
 

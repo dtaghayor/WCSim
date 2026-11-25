@@ -56,6 +56,11 @@ extern float       st_anc_ke0_MeV;
 extern std::string st_anc_creator;
 extern float st_px0, st_py0, st_pz0;
 extern float st_px1, st_py1, st_pz1;
+extern float st_len_cm;                 // total path length travelled
+extern int   st_ckv_status;             // 0 never / 1 crossed / 2 ended above
+extern float st_ckv_len_cm;             // radiating path length
+extern float st_ckv_ke_MeV;
+extern float st_ckv_x_cm, st_ckv_y_cm, st_ckv_z_cm, st_ckv_t_ns;
 // ================================================================
 //  SecTrackBuffer – pending-fill helper
 //
@@ -87,6 +92,17 @@ struct SecTrackBuffer {
   std::string end_process;
   float px0, py0, pz0;   // birth momentum direction (unit vector)
   float px1, py1, pz1;   // end momentum direction (unit vector)
+
+  // ---- Cherenkov threshold crossing, filled during stepping ----
+  // ckv_status: 0 = never above threshold (no Cherenkov light at all)
+  //             1 = crossed below threshold during tracking
+  //             2 = track ended while still above threshold
+  // ckv_len_cm is the RADIATING PATH LENGTH in every case.
+  int   ckv_status     = 0;
+  float ckv_len_cm     = 0.f;
+  float ckv_ke_MeV     = -1.f;
+  float ckv_x_cm=0, ckv_y_cm=0, ckv_z_cm=0, ckv_t_ns=0;
+  bool  ckv_seen_above = false;   // internal: was it ever above threshold?
 };
 
 // Map: Geant4 trackID → pending buffer
@@ -110,6 +126,7 @@ void SecondaryTracksTree_CacheBirth(int trackID, const SecTrackBuffer& buf);
 
 // Store end info and fill one row; call from PostUserTrackingAction
 void SecondaryTracksTree_FillEnd(int         trackID,
+                                  float       len_cm,
                                   float       x1_cm,
                                   float       y1_cm,
                                   float       z1_cm,

@@ -273,6 +273,7 @@ if (aTrack && secTrkFinished && g_secTrackBuffer.count(aTrack->GetTrackID())) {
 
   SecondaryTracksTree_FillEnd(
       aTrack->GetTrackID(),
+      (float)(aTrack->GetTrackLength() / cm),   // total path length travelled
       (float)(endpos.x() / cm),
       (float)(endpos.y() / cm),
       (float)(endpos.z() / cm),

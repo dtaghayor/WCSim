@@ -28,6 +28,10 @@ float       st_anc_ke0_MeV = 0.f;
 std::string st_anc_creator = "";
 float st_px0=0, st_py0=0, st_pz0=0;
 float st_px1=0, st_py1=0, st_pz1=0;
+float st_len_cm=0;
+int   st_ckv_status=0;
+float st_ckv_len_cm=0, st_ckv_ke_MeV=-1;
+float st_ckv_x_cm=0, st_ckv_y_cm=0, st_ckv_z_cm=0, st_ckv_t_ns=0;
 std::unordered_map<int, SecTrackBuffer> g_secTrackBuffer;
 
 
@@ -103,6 +107,18 @@ void SecondaryTracksTree_Book(TFile* fout)
   secondary_tracks_tree->Branch("px1", &st_px1, "px1/F");
   secondary_tracks_tree->Branch("py1", &st_py1, "py1/F");
   secondary_tracks_tree->Branch("pz1", &st_pz1, "pz1/F");
+
+  // Total path length actually travelled (NOT |x1-x0|, which is displacement).
+  secondary_tracks_tree->Branch("len_cm", &st_len_cm, "len_cm/F");
+
+  // Cherenkov threshold crossing.  ckv_len_cm is the radiating path length.
+  secondary_tracks_tree->Branch("ckv_status", &st_ckv_status, "ckv_status/I");
+  secondary_tracks_tree->Branch("ckv_len_cm", &st_ckv_len_cm, "ckv_len_cm/F");
+  secondary_tracks_tree->Branch("ckv_ke_MeV", &st_ckv_ke_MeV, "ckv_ke_MeV/F");
+  secondary_tracks_tree->Branch("ckv_x_cm",   &st_ckv_x_cm,   "ckv_x_cm/F");
+  secondary_tracks_tree->Branch("ckv_y_cm",   &st_ckv_y_cm,   "ckv_y_cm/F");
+  secondary_tracks_tree->Branch("ckv_z_cm",   &st_ckv_z_cm,   "ckv_z_cm/F");
+  secondary_tracks_tree->Branch("ckv_t_ns",   &st_ckv_t_ns,   "ckv_t_ns/F");
 }
 
 
@@ -115,6 +131,7 @@ void SecondaryTracksTree_CacheBirth(int trackID, const SecTrackBuffer& buf)
 
 // ----------------------------------------------------------------
 void SecondaryTracksTree_FillEnd(int         trackID,
+                                  float       len_cm,
                                   float       x1_cm,
                                   float       y1_cm,
                                   float       z1_cm,
@@ -162,6 +179,32 @@ void SecondaryTracksTree_FillEnd(int         trackID,
   st_px1 = px1;
   st_py1 = py1;
   st_pz1 = pz1;
+  st_len_cm = len_cm;
+
+  // Resolve the radiating path length for tracks that never crossed the
+  // threshold during tracking: either they died still radiating (status 2,
+  // radiating for their whole length) or they were never above it (status 0).
+  st_ckv_status = buf.ckv_status;
+  if (buf.ckv_status == 1) {
+    st_ckv_len_cm = buf.ckv_len_cm;
+    st_ckv_ke_MeV = buf.ckv_ke_MeV;
+    st_ckv_x_cm   = buf.ckv_x_cm;
+    st_ckv_y_cm   = buf.ckv_y_cm;
+    st_ckv_z_cm   = buf.ckv_z_cm;
+    st_ckv_t_ns   = buf.ckv_t_ns;
+  } else if (buf.ckv_seen_above) {
+    st_ckv_status = 2;              // still above threshold when it ended
+    st_ckv_len_cm = len_cm;         // radiated over its whole path
+    st_ckv_ke_MeV = -1.f;
+    st_ckv_x_cm = x1_cm; st_ckv_y_cm = y1_cm; st_ckv_z_cm = z1_cm;
+    st_ckv_t_ns = t1_ns;
+  } else {
+    st_ckv_status = 0;              // never radiated
+    st_ckv_len_cm = 0.f;
+    st_ckv_ke_MeV = -1.f;
+    st_ckv_x_cm = st_ckv_y_cm = st_ckv_z_cm = st_ckv_t_ns = 0.f;
+  }
+
   if (secondary_tracks_tree) secondary_tracks_tree->Fill();
 
   g_secTrackBuffer.erase(it);

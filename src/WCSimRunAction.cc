@@ -26,6 +26,8 @@
 #include "WCSimAncestryMap.hh"
 #include "WCSimPionSourceTree.hh"
 #include "WCSimSecondaryTrackTree.hh"
+#include "WCSimIonizingStepsTree.hh"
+#include "WCSimPionAnalysisMessenger.hh"
 #include "WCSimPionStepsTree.hh"
 
 int pawc_[500000];                // Declare the PAWC common
@@ -126,6 +128,9 @@ void WCSimRunAction::BeginOfRunAction(const G4Run* aRun)
       PionPhotonsTree_Book(hfile);
       SecondaryTracksTree_Book(hfile);
       PionStepsTree_Book(hfile);
+      // Per-step tree: booked only when the macro turned it on, so the
+      // branch does not appear at all in ordinary productions.
+      if (g_recordIonizingSteps) IonizingStepsTree_Book(hfile);
       // --- Create the per-detected-photon tree (primary-muon Cherenkov photons only) ---
       if (wcsimdetector->GetIsNuPrism()) {
 	if (fSettingsInputTree) {
@@ -533,6 +538,11 @@ if (secondary_tracks_tree) {
 if (pion_steps_tree) {
   gFile->cd();
   PionStepsTree_Write();
+}
+
+if (ionizing_steps_tree) {
+  gFile->cd();
+  IonizingStepsTree_Write();
 }
 
   //JR EDIT END

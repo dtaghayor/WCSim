@@ -31,7 +31,22 @@
 #include "WCSimAncestryMap.hh"
 #include "WCSimPionSourceTree.hh"
 #include "WCSimPionStepsTree.hh"
+#include "WCSimSecondaryTrackTree.hh"
+#include "WCSimIonizingStepsTree.hh"
+#include "WCSimPionAnalysisMessenger.hh"
 #include <set>
+#include <cmath>
+
+// beta = v/c from kinetic energy and rest mass
+static inline double PionAnalysis_Beta(double ke_MeV, double m_MeV)
+{
+  if (m_MeV <= 0.0) return 1.0;
+  const double E = ke_MeV + m_MeV;
+  if (E <= 0.0) return 0.0;
+  const double r = m_MeV / E;
+  const double b2 = 1.0 - r*r;
+  return (b2 > 0.0) ? std::sqrt(b2) : 0.0;
+}
 
 std::unordered_map<const G4Track*, AllPhotonBirthInfo> g_allPhotonBirth;  // definition
 int WCSimSteppingAction::primaryMuonTrackID = -1;
@@ -69,7 +84,8 @@ G4int WCSimSteppingAction::n_photons_on_smallPMT = 0;
 
 
 WCSimSteppingAction::WCSimSteppingAction(WCSimRunAction *myRun, WCSimDetectorConstruction *myDet) : runAction(myRun), det(myDet) {
-
+  // Registers /WCSim/PionAnalysis/... before the steering macro is executed.
+  fPionAnalysisMessenger = new WCSimPionAnalysisMessenger();
 }
 
 
@@ -362,20 +378,26 @@ if (std::abs(piPDG) == 211 || piPDG == 111 || std::abs(piPDG) == 13) {
   // NOTE: these are Geant4 *runtime* process-name strings and are
   // physics-list-dependent. If your list names muon single-scattering
   // "CoulombScattering" (or folds it into "msc"), adjust the muon branch.
+  // Any at-rest capture, whatever this physics list happens to call it.
+  // Measured names: "hBertiniCaptureAtRest" (pi-), "muMinusCaptureAtRest"
+  // (mu-).  Other physics lists use "pi-CaptureAtRest".  Match the common
+  // suffix instead of enumerating names that may not exist.
+  const bool isCaptureAtRest =
+      (procName.find("CaptureAtRest") != std::string::npos);
+
   const bool isInteresting =
       (isPion &&
-       (procName == "hadElastic"       ||
-        procName == "pi+Inelastic"     ||
-        procName == "pi-Inelastic"     ||
-        procName == "pi0Inelastic"     ||
-        procName == "Decay"            ||
-        procName == "pi-CaptureAtRest" ||
-        procName == "pi+CaptureAtRest"))
+       (procName == "hadElastic"   ||
+        procName == "pi+Inelastic" ||
+        procName == "pi-Inelastic" ||
+        procName == "pi0Inelastic" ||
+        procName == "Decay"        ||
+        isCaptureAtRest))
       ||
       (isMuon &&
-       (procName == "Decay"                ||  // Michel decay vertex (mu+/-)
-        procName == "muMinusCaptureAtRest" ||  // mu- capture at rest
-        procName == "CoulombScat"));           // single hard Coulomb deflection
+       (procName == "Decay"        ||  // Michel decay vertex (mu+/-)
+        procName == "CoulombScat"  ||  // single hard Coulomb deflection
+        isCaptureAtRest));             // mu- capture / decay-in-orbit
 
   // A1 FIX: always record the at-rest death vertex, even when the process
   // name could not be resolved to a known terminator.  In-flight world-exits
@@ -450,6 +472,102 @@ if (std::abs(piPDG) == 211 || piPDG == 111 || std::abs(piPDG) == 13) {
       }
     }
     PionStepsTree_Fill();
+  }
+}
+
+// ================================================================
+// PION ANALYSIS: Cherenkov threshold crossing (always on) and the
+// optional per-step ionizing record (off unless the macro enables it).
+// Applies to every charged track that secondary_tracks is following,
+// i.e. the primary and its charged daughters.
+// ================================================================
+{
+  const G4ParticleDefinition* sdef = stepTrack->GetDefinition();
+  if (sdef && sdef->GetPDGCharge() != 0.0) {
+
+    auto sit = g_secTrackBuffer.find(stepTrack->GetTrackID());
+    if (sit != g_secTrackBuffer.end()) {
+      SecTrackBuffer& B = sit->second;
+
+      const double mMeV   = sdef->GetPDGMass() / MeV;
+      const double kePreC = aStep->GetPreStepPoint()->GetKineticEnergy()  / MeV;
+      const double kePosC = aStep->GetPostStepPoint()->GetKineticEnergy() / MeV;
+      const double bPre   = PionAnalysis_Beta(kePreC, mMeV);
+      const double bPost  = PionAnalysis_Beta(kePosC, mMeV);
+      const double bThr   = 1.0 / g_cherenkovIndex;
+
+      const double stepLen  = aStep->GetStepLength() / cm;
+      const double trackLen = stepTrack->GetTrackLength() / cm;  // incl. this step
+      double lenPre = trackLen - stepLen;
+      if (lenPre < 0.0) lenPre = 0.0;
+
+      if (bPre > bThr) B.ckv_seen_above = true;
+
+      // First downward crossing: interpolate the crossing point inside the step.
+      if (B.ckv_status != 1 && bPre > bThr && bPost <= bThr) {
+        const double denom = bPre - bPost;
+        const double frac  = (denom > 0.0) ? (bPre - bThr) / denom : 0.0;
+        const G4ThreeVector p0 = aStep->GetPreStepPoint()->GetPosition();
+        const G4ThreeVector p1 = aStep->GetPostStepPoint()->GetPosition();
+        const double t0 = aStep->GetPreStepPoint()->GetGlobalTime()  / ns;
+        const double t1 = aStep->GetPostStepPoint()->GetGlobalTime() / ns;
+
+        // KE at threshold for this mass: gamma_thr = n / sqrt(n^2 - 1)
+        const double n2   = g_cherenkovIndex * g_cherenkovIndex;
+        const double gThr = (n2 > 1.0) ? g_cherenkovIndex / std::sqrt(n2 - 1.0) : 1.0;
+
+        B.ckv_status = 1;
+        B.ckv_len_cm = (float)(lenPre + frac * stepLen);
+        B.ckv_ke_MeV = (float)((gThr - 1.0) * mMeV);
+        B.ckv_x_cm   = (float)((p0.x() + frac*(p1.x()-p0.x())) / cm);
+        B.ckv_y_cm   = (float)((p0.y() + frac*(p1.y()-p0.y())) / cm);
+        B.ckv_z_cm   = (float)((p0.z() + frac*(p1.z()-p0.z())) / cm);
+        B.ckv_t_ns   = (float)(t0 + frac*(t1-t0));
+      }
+
+      // ---- optional per-step record ----
+      if (g_recordIonizingSteps && ionizing_steps_tree) {
+        is_evt        = evid;
+        is_trk        = stepTrack->GetTrackID();
+        is_pdg        = sdef->GetPDGEncoding();
+        is_parent_trk = stepTrack->GetParentID();
+        is_src_cat    = B.src_cat;
+        is_step       = stepTrack->GetCurrentStepNumber();
+
+        const G4ThreeVector ep = aStep->GetPostStepPoint()->GetPosition();
+        is_x_cm = (float)(ep.x()/cm);
+        is_y_cm = (float)(ep.y()/cm);
+        is_z_cm = (float)(ep.z()/cm);
+        is_t_ns = (float)(aStep->GetPostStepPoint()->GetGlobalTime()/ns);
+
+        is_ke_pre_MeV   = (float)kePreC;
+        is_ke_post_MeV  = (float)kePosC;
+        is_edep_MeV     = (float)(aStep->GetTotalEnergyDeposit()/MeV);
+        is_step_len_cm  = (float)stepLen;
+        is_track_len_cm = (float)trackLen;
+        is_beta_pre     = (float)bPre;
+        is_beta_post    = (float)bPost;
+        is_above_ckv    = (bPost > bThr) ? 1 : 0;
+
+        int nck = 0;
+        const auto* isecs = aStep->GetSecondaryInCurrentStep();
+        if (isecs) {
+          for (auto* sc : *isecs) {
+            if (!sc) continue;
+            if (sc->GetDefinition() != G4OpticalPhoton::OpticalPhotonDefinition())
+              continue;
+            const G4VProcess* ccp = sc->GetCreatorProcess();
+            if (ccp && ccp->GetProcessName() == "Cerenkov") ++nck;
+          }
+        }
+        is_n_cherenkov = nck;
+
+        const G4VProcess* ipr = aStep->GetPostStepPoint()->GetProcessDefinedStep();
+        is_process = ipr ? ipr->GetProcessName() : "NONE";
+
+        IonizingStepsTree_Fill();
+      }
+    }
   }
 }
 /*
