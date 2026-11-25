@@ -54,6 +54,13 @@ WCSimPrimaryGeneratorMessenger::WCSimPrimaryGeneratorMessenger(WCSimPrimaryGener
   gpsBeamSigmaYCmd->SetUnitCategory("Length");
   gpsBeamSigmaYCmd->SetDefaultUnit("cm");
 
+  gpsBeamT5AcceptanceCmd = new G4UIcmdWithABool("/mygen/gpsBeamT5Acceptance", this);
+  gpsBeamT5AcceptanceCmd->SetGuidance("GPS beam spot: keep only vertices whose transverse offset lies inside a");
+  gpsBeamT5AcceptanceCmd->SetGuidance("T5 bar (8 stacked bars, see WCSimT5Geometry.hh), emulating the T5 trigger.");
+  gpsBeamT5AcceptanceCmd->SetGuidance("Uses /mygen/gpsBeamSigmaX/Y. Combined with gpsBeamPipeDiameter if that is > 0.");
+  gpsBeamT5AcceptanceCmd->SetParameterName("useT5", true);
+  gpsBeamT5AcceptanceCmd->SetDefaultValue(true);
+
   //C. Vilela: Adding PMTPoisson for generating photoelectrons directly on PMTs according to a Poisson distribution.
   poisCmd = new G4UIcmdWithABool("/mygen/pmtPoisson",this);
   poisCmd->SetGuidance("Flag for generating photoelectrons directly on PMTs according to a Poisson distribution. These PE's will be generated in addition to light produce by any particles generated. Set dark rate to 0 and do not generate any particles for events with only Poisson PE's.");
@@ -273,6 +280,7 @@ WCSimPrimaryGeneratorMessenger::~WCSimPrimaryGeneratorMessenger()
   delete gpsBeamPipeDiameterCmd;
   delete gpsBeamSigmaXCmd;
   delete gpsBeamSigmaYCmd;
+  delete gpsBeamT5AcceptanceCmd;
   delete radioactive_time_window_Cmd;
   delete nPhotonsCmd;
   delete injectorOnCmd;
@@ -588,6 +596,8 @@ void WCSimPrimaryGeneratorMessenger::SetNewValue(G4UIcommand * command,G4String 
     myAction->SetGPSBeamSigmaX(gpsBeamSigmaXCmd->GetNewDoubleValue(newValue));
   if (command == gpsBeamSigmaYCmd)
     myAction->SetGPSBeamSigmaY(gpsBeamSigmaYCmd->GetNewDoubleValue(newValue));
+  if (command == gpsBeamT5AcceptanceCmd)
+    myAction->SetGPSBeamT5Acceptance(gpsBeamT5AcceptanceCmd->GetNewBoolValue(newValue));
 
   if( command == fileNameCmd)
   {

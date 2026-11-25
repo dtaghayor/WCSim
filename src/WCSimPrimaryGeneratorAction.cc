@@ -42,6 +42,7 @@
 #include "TRandom3.h"
 #include "G4PhysicalConstants.hh"
 #include "G4SystemOfUnits.hh"
+#include "WCSimT5Geometry.hh"
 //#define PAIR//B.Q
 using std::vector;
 using std::string;
@@ -902,7 +903,7 @@ void WCSimPrimaryGeneratorAction::GeneratePrimaries(G4Event* anEvent)
   else if (useGPSEvt)
     {
       MyGPS->GeneratePrimaryVertex(anEvent);
-      if (gpsBeamPipeDiameter > 0.) ApplyGPSBeamSpot(anEvent);
+      if (gpsBeamPipeDiameter > 0. || gpsBeamT5Acceptance) ApplyGPSBeamSpot(anEvent);
 
       G4ThreeVector P   =anEvent->GetPrimaryVertex()->GetPrimary()->GetMomentum();
       G4ThreeVector vtx =anEvent->GetPrimaryVertex()->GetPosition();
@@ -1748,11 +1749,16 @@ NuHepMC3Reader: [INFO] Particle ID: "
 }
 
 // GPS beam spot: move the primary vertex to a point drawn from a 2D Gaussian
-// centred on the GPS vertex, in the plane transverse to the primary momentum,
-// rejecting draws outside radius gpsBeamPipeDiameter/2 (T5 acceptance).
+// centred on the GPS vertex, in the plane transverse to the primary momentum.
+// Draws are rejected if they fall outside the acceptance:
+//  - gpsBeamPipeDiameter > 0: a circle of that diameter;
+//  - gpsBeamT5Acceptance:     the T5 bar layout (WCSimT5Geometry.hh), i.e. the
+//                             beam particle must have passed through T5.
+// Both may be active (intersection). The GPS vertex is assumed to lie on the
+// beam pipe / T5 axis. Beam divergence between T5 and the vertex is ignored.
 // Ported from Martiloris/WCSim (Loris/Thorsten); generalised from global x-y
-// to the transverse plane. For a beam along +-z, sigmaX/sigmaY act along
-// global x/y. Only the first primary vertex is moved.
+// to the transverse plane. For a beam along +-z, sigmaX/sigmaY (and the T5 bar
+// length/stacking axes) act along global x/y. Only the first vertex is moved.
 void WCSimPrimaryGeneratorAction::ApplyGPSBeamSpot(G4Event* anEvent)
 {
   G4PrimaryVertex* vertex = anEvent->GetPrimaryVertex();
@@ -1769,14 +1775,17 @@ void WCSimPrimaryGeneratorAction::ApplyGPSBeamSpot(G4Event* anEvent)
   const G4ThreeVector v = d.cross(u);
 
   const G4double rmax = 0.5 * gpsBeamPipeDiameter;
+  const G4bool useCircle = (gpsBeamPipeDiameter > 0.);
 
   if (!gpsBeamSpotLogged) {
-    G4cout << "GPS beam spot ON: diameter " << gpsBeamPipeDiameter / cm << " cm, sigmaX "
-           << gpsBeamSigmaX / cm << " cm, sigmaY " << gpsBeamSigmaY / cm << " cm, axes u=" << u
-           << " v=" << v << G4endl;
+    G4cout << "GPS beam spot ON: sigmaX " << gpsBeamSigmaX / cm << " cm, sigmaY "
+           << gpsBeamSigmaY / cm << " cm, acceptance:"
+           << (useCircle ? " circle D=" + std::to_string(gpsBeamPipeDiameter / cm) + " cm" : "")
+           << (gpsBeamT5Acceptance ? " T5-bars" : "")
+           << ", axes u=" << u << " v=" << v << G4endl;
     if (gpsBeamSigmaX <= 0. && gpsBeamSigmaY <= 0.)
       G4cout << "WARNING: GPS beam spot has both sigmas = 0; vertex will not be smeared." << G4endl;
-    if (gpsBeamSigmaX > 2. * rmax || gpsBeamSigmaY > 2. * rmax)
+    if (useCircle && (gpsBeamSigmaX > 2. * rmax || gpsBeamSigmaY > 2. * rmax))
       G4cout << "WARNING: GPS beam spot sigma > diameter; distribution is nearly a uniform disk "
              << "and rejection sampling is inefficient." << G4endl;
     gpsBeamSpotLogged = true;
@@ -1786,7 +1795,8 @@ void WCSimPrimaryGeneratorAction::ApplyGPSBeamSpot(G4Event* anEvent)
   do {
     a = (gpsBeamSigmaX > 0.) ? G4RandGauss::shoot(0., gpsBeamSigmaX) : 0.;
     b = (gpsBeamSigmaY > 0.) ? G4RandGauss::shoot(0., gpsBeamSigmaY) : 0.;
-  } while (a * a + b * b > rmax * rmax);
+  } while ((useCircle && a * a + b * b > rmax * rmax) ||
+           (gpsBeamT5Acceptance && !WCSimT5::Contains(a, b)));
 
   const G4ThreeVector pos = vertex->GetPosition() + a * u + b * v;
   vertex->SetPosition(pos.x(), pos.y(), pos.z());

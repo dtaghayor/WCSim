@@ -66,6 +66,7 @@ public:
   inline void SetGPSBeamPipeDiameter(G4double v) { gpsBeamPipeDiameter = v; }
   inline void SetGPSBeamSigmaX(G4double v)       { gpsBeamSigmaX = v; }
   inline void SetGPSBeamSigmaY(G4double v)       { gpsBeamSigmaY = v; }
+  inline void SetGPSBeamT5Acceptance(G4bool b)   { gpsBeamT5Acceptance = b; }
 
   // These go with jhfNtuple
   G4int GetVecRecNumber(){return vecRecNumber;}
@@ -136,6 +137,7 @@ private:
   G4double gpsBeamPipeDiameter = 0.0;
   G4double gpsBeamSigmaX = 0.0;
   G4double gpsBeamSigmaY = 0.0;
+  G4bool   gpsBeamT5Acceptance = false;
   G4bool   gpsBeamSpotLogged = false;
   void ApplyGPSBeamSpot(G4Event* anEvent);
 

@@ -10,6 +10,7 @@
 #include "G4LogicalSkinSurface.hh"
 
 #include "G4SystemOfUnits.hh"
+#include "WCSimT5Geometry.hh"
 
 
 // WCTE beam pipe logical volume construction.
@@ -132,9 +133,10 @@ G4LogicalVolume* WCSimDetectorConstruction::ConstructBeamPipe()
   G4double totalAssemblyThickness = (2*t_vinyl) + t_gap1 + (2*t_mylar) + t_scint + t_gap2; // Should be 43.0 mm
   
   // -- Bar Dimensions (X/Y) --
-  const G4int nBars = 8;
-  G4double barHeight = 16.25 * mm; // Y dimension
-  G4double barLengths[nBars] = {41*mm, 94*mm, 112*mm, 123*mm, 123*mm, 112*mm, 94*mm, 41*mm}; // X dimension
+  // Shared with the GPS beam-spot acceptance: see include/WCSimT5Geometry.hh
+  const G4int nBars = WCSimT5::nBars;
+  const G4double barHeight = WCSimT5::barHeight; // Y dimension
+  const G4double* barLengths = WCSimT5::barLengths; // X dimension
 
   // -- Visualization Attributes --
   G4VisAttributes *visScint = new G4VisAttributes(G4Colour::Cyan());

@@ -50,6 +50,7 @@ class WCSimPrimaryGeneratorMessenger: public G4UImessenger
   G4UIcmdWithADoubleAndUnit* gpsBeamPipeDiameterCmd;
   G4UIcmdWithADoubleAndUnit* gpsBeamSigmaXCmd;
   G4UIcmdWithADoubleAndUnit* gpsBeamSigmaYCmd;
+  G4UIcmdWithABool*          gpsBeamT5AcceptanceCmd;
 
   // K.M.Tsui: addition of injector events
   G4UIcmdWithAnInteger* nPhotonsCmd;
